@@ -1,6 +1,6 @@
 FROM nvidia/cuda:12.4.1-devel-ubuntu20.04
 
-ENV ARGOS_DEVICE_TYPE cuda
+ENV ARGOS_DEVICE_TYPE auto
 ARG with_models=false
 ARG models=""
 
@@ -34,6 +34,7 @@ RUN if [ "$with_models" = "true" ]; then  \
 
 # Install package from source code
 RUN pip3 install Babel==2.12.1 && python3 scripts/compile_locales.py \
+    && pip3 install "numpy<2" \
     && pip3 install . \
     && pip3 cache purge
 

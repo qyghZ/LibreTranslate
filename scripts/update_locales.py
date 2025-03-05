@@ -9,11 +9,12 @@ import re
 import polib
 from babel.messages.frontend import main as pybabel
 from flask_swagger import swagger
+from translatehtml import translate_html
+
 from libretranslate.app import create_app, get_version
 from libretranslate.language import improve_translation_formatting, load_languages
 from libretranslate.locales import get_available_locale_codes, swag_eval
 from libretranslate.main import get_args
-from translatehtml import translate_html
 
 # Update strings
 if __name__ == "__main__":
@@ -30,9 +31,17 @@ if __name__ == "__main__":
 
     # Dump language list so it gets picked up by pybabel
     langs_file = os.path.join(locales_dir, ".langs.py")
+    lang_names = {}
     with open(langs_file, 'w') as f:
         for l in languages:
             f.write("_(%s)\n" % json.dumps(l.name))
+            lang_names[l.name] = True
+
+        # Additional names that might be missing
+        for l in ["Serbian", "Ukrainian", "Vietnamese"]:
+            if not l in lang_names:
+                f.write("_(%s)\n" % json.dumps(l))
+                lang_names[l] = True
     print("Wrote %s" % langs_file)
 
     # Dump swagger strings
@@ -61,33 +70,46 @@ if __name__ == "__main__":
                 "-o", messagespot, "libretranslate"]
     pybabel()
 
-    lang_codes = [l.code for l in languages if l.code != "en"]
+    lang_map = {
+        'zt': 'zh_Hant'
+    }
+    lang_codes = [lang_map.get(l.code, l.code) for l in languages if l.code != "en"]
+    all_folders = [d for d in os.listdir(locales_dir) if os.path.isdir(os.path.join(locales_dir, d))]
+    review_map = {}
 
     # Init/update
-    for l in lang_codes:
+    for l in all_folders:
         cmd = "init"
         if os.path.isdir(os.path.join(locales_dir, l, "LC_MESSAGES")):
             cmd = "update"
 
-        sys.argv = ["", cmd, "-i", messagespot, "-d", locales_dir, "-l", l]
+        sys.argv = ["", cmd, "-i", messagespot, "-d", locales_dir, "-l", l] + (["--no-fuzzy-matching"] if cmd == "update" else [])
         pybabel()
 
         meta_file = os.path.join(locales_dir, l, "meta.json")
+        reviewed = False
         if not os.path.isfile(meta_file):
             with open(meta_file, 'w') as f:
                 f.write(json.dumps({
-                    'name': next(lang.name for lang in languages if lang.code == l),
+                    'name': l if l not in lang_codes else next(lang.name for lang in languages if lang_map.get(lang.code, lang.code) == l),
                     'reviewed': False
                 }, indent=4))
                 print("Wrote %s" % meta_file)
+        else:
+            with open(meta_file) as f:
+                reviewed = json.loads(f.read()).get('reviewed', False)
+
+        review_map[l] = reviewed
 
     # Automatically translate strings with libretranslate
     # when a language model is available and a string is empty
 
     locales = get_available_locale_codes(only_reviewed=False)
-    print(locales)
     for locale in locales:
         if locale == 'en':
+            continue
+        if review_map.get(locale):
+            # Don't automatically translate reviewed languages
             continue
 
         tgt_lang = next((l for l in languages if l.code == locale), None)
